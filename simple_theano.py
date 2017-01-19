@@ -1,3 +1,4 @@
+from __future__ import print_function
 import numpy
 import theano
 import theano.tensor as T
@@ -110,7 +111,7 @@ print(state.get_value())
 # Lesson 8: Random Numbers
 print('Lesson 8')
 from theano.tensor.shared_randomstreams import RandomStreams
-srng = RandomStreams(seed=234)
+srng = RandomStreams(seed=234)              # RandomStreams object - a random number generator
 # create random stream of 2x2 matrices of draws from a uniform distribution
 rv_u = srng.uniform((2,2))
 # create random stream of 2x2 matrices of draws from a normal distribution
@@ -127,3 +128,50 @@ print(g())
 nearly_zeros = function([], rv_u + rv_u - 2 * rv_u)     # should return 0
 
 # seeding streams - random variables can be seeded individually or collectively
+rng_val = rv_u.rng.get_value(borrow=True)   # Get the rng for rv_u
+rng_val.seed(89234)                         # seeds the generator
+rv_u.rng.set_value(rng_val, borrow=True)    # Assign back seeded rng
+
+srng.seed(902340)  # seeds rv_u and rv_n with different seeds each
+
+# sharing streams between functions
+state_after_v0 = rv_u.rng.get_value().get_state()
+print(nearly_zeros())     # this affects rv_u's generator
+v1 = f()
+print(v1)
+rng = rv_u.rng.get_value(borrow=True)
+rng.set_state(state_after_v0)
+rv_u.rng.set_value(rng, borrow=True)
+v2 = f()             # v2 != v1
+print(v2)
+v3 = f()             # v3 == v1
+
+# copying random state between theano graphs
+# might arise for example if you are trying to initialize the state of a model,
+# from the parameters of a pickled version of a previous model
+# Each time a random variable is drawn from a RandomStreams object, a tuple is added to the state_updates list.
+from theano.sandbox.rng_mrg import MRG_RandomStreams
+from theano.tensor.shared_randomstreams import RandomStreams
+
+
+class Graph():
+    def __init__(self, seed=123):
+        self.rng = RandomStreams(seed)
+        self.y = self.rng.uniform(size=(1,))
+
+g1 = Graph(seed=123)
+f1 = function([], g1.y)
+g2 = Graph(seed=987)
+f2 = function([], g2.y)
+
+
+def copy_random_state(g1, g2):
+    if isinstance(g1.rng, MRG_RandomStreams):
+        g2.rng.rstate = g1.rng.rstate
+    for (su1, su2) in zip(g1.rng.state_updates, g2.rng.state_updates):
+        su2[0].set_value(su1[0].get_value())
+
+# copy the state of the theano random number generators:
+copy_random_state(g1, g2)
+print(f1())
+print(f2())
